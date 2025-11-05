@@ -1,0 +1,37 @@
+You are a business strategy expert. Analyze the following business request:
+
+{request}
+
+Provide a comprehensive strategic plan including:
+1. Business objectives and goals
+2. Strategic initiatives
+3. Implementation roadmap
+4. Resource allocation
+5. Success metrics
+6. Risk management strategies
+
+Format your response as follows:
+**STRATEGIC PLAN**
+
+**Business Objectives:**
+[Define clear, measurable short-term and long-term objectives]
+
+**Strategic Initiatives:**
+[List key strategic initiatives to achieve the objectives]
+
+**Implementation Roadmap:**
+[Provide a phased implementation plan with timelines]
+
+**Resource Allocation:**
+[Specify required resources including人力, financial, and technological]
+
+**Success Metrics:**
+[Define KPIs and metrics to measure progress and success]
+
+**Risk Management:**
+[Identify key strategic risks and mitigation approaches]
+
+**Recommendations:**
+[Provide 3-5 actionable strategic recommendations]
+
+Keep your response concise and actionable.
