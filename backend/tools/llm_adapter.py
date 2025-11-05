@@ -1,4 +1,6 @@
 import os
+import logging
+import traceback
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -44,40 +46,70 @@ class LLMAdapter:
 
         # Try multiple OpenAI client patterns to support different SDK versions.
         try:
-            # If the newer OpenAI client class is available, use it.
+            # First, prefer the newer `openai.OpenAI` class if it's available.
             if hasattr(openai, "OpenAI"):
-                client = openai.OpenAI(api_key=self.api_key)
-                resp = client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                )
-                # response shape: resp.choices[0].message.content
-                choice = resp.choices[0]
-                if hasattr(choice, "message"):
-                    return getattr(choice.message, "content", "") if not isinstance(choice.message, dict) else choice.message.get("content", "")
+                try:
+                    # Some SDK versions expect no args in constructor; others accept api_key.
+                    try:
+                        client = openai.OpenAI()
+                    except TypeError:
+                        # Last-resort: set global api key and instantiate without args
+                        if hasattr(openai, "api_key"):
+                            openai.api_key = self.api_key
+                        else:
+                            os.environ["OPENAI_API_KEY"] = self.api_key
+                        client = openai.OpenAI()
 
-            # Fallback to older style
-            if hasattr(openai, "ChatCompletion"):
-                resp = openai.ChatCompletion.create(
-                    model=self.model,
-                    messages=messages,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                )
-                choice = resp.choices[0]
-                # older responses sometimes provide `message` or `text`
-                if isinstance(choice, dict):
-                    if "message" in choice and isinstance(choice["message"], dict):
-                        return choice["message"].get("content", "")
-                    return choice.get("text", "")
-                # attribute access
-                if hasattr(choice, "message"):
-                    return getattr(choice.message, "content", "")
+                    # If client has an attribute to set api_key, do it.
+                    if hasattr(client, "api_key"):
+                        try:
+                            client.api_key = self.api_key
+                        except Exception:
+                            # ignore if not settable
+                            pass
 
-            # If we reach here, the SDK didn't match expected patterns
-            return "Error calling OpenAI: unsupported openai SDK interface. Set USE_MOCK_LLM=1 to use mock responses."
+                    resp = client.chat.completions.create(
+                        model=self.model,
+                        messages=messages,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                    )
+                    # response shape: resp.choices[0].message.content
+                    choice = resp.choices[0]
+                    if hasattr(choice, "message"):
+                        return getattr(choice.message, "content", "") if not isinstance(choice.message, dict) else choice.message.get("content", "")
+
+                except TypeError:
+                    # Fall through to legacy path if constructor signature mismatches
+                    pass
+
+            # If the newer OpenAI client is not available, do not attempt to access
+            # the removed `openai.ChatCompletion` symbol directly because newer
+            # `openai` packages raise an explanatory error when that attribute is
+            # referenced. Instead, provide a clear message advising migration or
+            # pinning to an older client.
+            if not hasattr(openai, "OpenAI"):
+                return (
+                    "Error calling OpenAI: detected openai-python SDK that does not expose\n"
+                    "the modern `OpenAI` client. Please either run `openai migrate` to\n"
+                    "upgrade your codebase to the 1.0+ interface or pin the older\n"
+                    "client with `pip install openai==0.28`.\n"
+                    "See https://github.com/openai/openai-python/discussions/742 for details."
+                )
+
+            # If we've fallen through and the newer client existed but something
+            # else failed, return a generic error (caught by outer except).
+            return "Error calling OpenAI: unable to call OpenAI client (see inner error)."
         except Exception as e:
-            # On any runtime error, return a helpful message instead of crashing.
-            return f"Error calling OpenAI: {e}"
+            # Log the full exception and stacktrace to server logs for debugging.
+            logging.exception("OpenAI client call failed")
+            # If DEBUG_LLM is set, return a short, non-sensitive inner error to help
+            # debugging during development. Do NOT enable in production.
+            debug_mode = os.getenv("DEBUG_LLM", "0").lower() in ("1", "true")
+            if debug_mode:
+                short = f"{type(e).__name__}: {str(e)}"
+                # Truncate to avoid huge dumps
+                return f"Error calling OpenAI: {short[:1000]}"
+
+            # Avoid returning raw exception traces to users (may contain sensitive info).
+            return "Error calling OpenAI: unable to call OpenAI client (see server logs for details)."
